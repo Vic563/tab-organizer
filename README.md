@@ -4,13 +4,17 @@ A Chrome extension for automatic and manual tab organization with cloud sync - s
 
 ## Features
 
+### Implemented
 - **Automatic Tab Detection** - Detects tabs unused for 8+ hours and prompts to save/close
+- **Folders** - Manual organization by project/topic with create/edit/delete
+- **Save to Folder** - Save any open tab directly to a folder
+- **One-click Restore** - Open all tabs from a folder at once
+- **Search** - Search across both open and saved tabs
+- **Archive View** - View and manage all saved tabs grouped by date
+
+### Coming Soon
 - **Smart Sessions** - Auto-groups related tabs based on time
-- **Folders** - Manual organization by project/topic
-- **One-click Restore** - Open all tabs from a session/folder at once
-- **Search** - Search across all saved tabs
-- **Archive** - Historical tracking of old tabs
-- **Cloud Sync** - Sync across devices with Supabase (coming soon)
+- **Cloud Sync** - Sync across devices with Supabase
 
 ## Tech Stack
 
@@ -71,9 +75,9 @@ tab-organizer/
 ## Roadmap
 
 - [x] Phase 1: Foundation - Project setup, manifest, service worker
-- [ ] Phase 2: Core Features - Tab tracking, save/close, folders, sessions
+- [x] Phase 2: Core Features - Tab tracking, save/close, folders, search
 - [ ] Phase 3: Cloud Integration - Supabase, auth, sync
-- [ ] Phase 4: Smart Features - Auto-grouping, archive
+- [ ] Phase 4: Smart Features - Auto-grouping, archive, sessions
 - [ ] Phase 5: Polish - UI, onboarding, Chrome Web Store
 
 ## License
