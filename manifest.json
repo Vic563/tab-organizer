@@ -21,7 +21,8 @@
     "storage",
     "alarms",
     "identity",
-    "sessions"
+    "sessions",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>"

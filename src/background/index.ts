@@ -48,6 +48,9 @@ async function handleInstalled(details: chrome.runtime.InstalledDetails) {
 
   // Always ensure alarms exist after install/update
   await ensureAlarmsExist();
+
+  // Sync existing tabs so they show up immediately
+  await syncCurrentTabs();
 }
 
 async function handleStartup() {
@@ -65,6 +68,7 @@ async function initializeExtension() {
     tab_activity: {},
     stale_tabs: [],
     saved_tabs: [],
+    archived_tabs: [],
     sessions: [],
     folders: [],
     sync_queue: [],
@@ -92,6 +96,16 @@ async function ensureAlarmsExist() {
       delayInMinutes: 2,
     });
     console.log('[TabOrganizer] Created cloud-sync alarm');
+  }
+
+  // Auto-archive check once per day
+  const archiveAlarm = await chrome.alarms.get('auto-archive');
+  if (!archiveAlarm) {
+    await chrome.alarms.create('auto-archive', {
+      periodInMinutes: 60 * 24, // Once per day
+      delayInMinutes: 5,
+    });
+    console.log('[TabOrganizer] Created auto-archive alarm');
   }
 }
 
@@ -185,6 +199,9 @@ async function handleAlarm(alarm: chrome.alarms.Alarm) {
     case 'cloud-sync':
       await performCloudSync();
       break;
+    case 'auto-archive':
+      await autoArchiveTabs();
+      break;
   }
 }
 
@@ -229,6 +246,11 @@ async function checkForInactiveTabs() {
     if (staleTabs.length > 0) {
       await chrome.action.setBadgeText({ text: staleTabs.length.toString() });
       await chrome.action.setBadgeBackgroundColor({ color: '#F59E0B' });
+
+      // Send notification if enabled
+      if (settings.notification_enabled) {
+        await sendStaleTabsNotification(staleTabs.length);
+      }
     } else {
       await chrome.action.setBadgeText({ text: '' });
     }
@@ -243,6 +265,75 @@ async function performCloudSync() {
   // TODO: Implement cloud sync with Supabase
   console.log('[TabOrganizer] Cloud sync triggered (not implemented yet)');
 }
+
+async function autoArchiveTabs() {
+  try {
+    const result = await chrome.storage.local.get(['saved_tabs', 'archived_tabs', 'user_settings']);
+    const saved_tabs = (result.saved_tabs || []) as LocalSavedTab[];
+    const archived_tabs = (result.archived_tabs || []) as LocalSavedTab[];
+    const settings = (result.user_settings || DEFAULT_SETTINGS) as UserSettings;
+
+    const thresholdMs = settings.auto_archive_days * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    const tabsToArchive: LocalSavedTab[] = [];
+    const remainingTabs: LocalSavedTab[] = [];
+
+    for (const tab of saved_tabs) {
+      const tabAge = now - new Date(tab.created_at).getTime();
+      if (tabAge > thresholdMs) {
+        tabsToArchive.push(tab);
+      } else {
+        remainingTabs.push(tab);
+      }
+    }
+
+    if (tabsToArchive.length > 0) {
+      await chrome.storage.local.set({
+        saved_tabs: remainingTabs,
+        archived_tabs: [...archived_tabs, ...tabsToArchive],
+      });
+      console.log('[TabOrganizer] Auto-archived', tabsToArchive.length, 'tabs');
+    }
+  } catch (error) {
+    console.error('[TabOrganizer] Error auto-archiving tabs:', error);
+  }
+}
+
+async function sendStaleTabsNotification(count: number) {
+  // Check if we've sent a notification recently (avoid spamming)
+  const result = await chrome.storage.local.get('last_notification_time');
+  const lastTime = result.last_notification_time as number | undefined;
+  const now = Date.now();
+
+  // Only send notification once per hour
+  if (lastTime && now - lastTime < 60 * 60 * 1000) {
+    return;
+  }
+
+  try {
+    await chrome.notifications.create('stale-tabs', {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Tab Organizer',
+      message: `You have ${count} inactive tab${count > 1 ? 's' : ''}. Click to review and save them.`,
+      priority: 1,
+    });
+
+    await chrome.storage.local.set({ last_notification_time: now });
+    console.log('[TabOrganizer] Sent stale tabs notification');
+  } catch (error) {
+    console.error('[TabOrganizer] Failed to send notification:', error);
+  }
+}
+
+// Handle notification click
+chrome.notifications.onClicked.addListener((notificationId) => {
+  if (notificationId === 'stale-tabs') {
+    // Open the extension popup
+    chrome.action.openPopup?.();
+  }
+});
 
 // ============================================================================
 // Message Handlers

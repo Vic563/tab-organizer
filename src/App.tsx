@@ -6,6 +6,7 @@ import ArchivePage from './popup/pages/Archive';
 import SettingsPage from './popup/pages/Settings';
 import SearchResults from './popup/pages/SearchResults';
 import SearchBar from './popup/components/SearchBar';
+import type { UserSettings } from './shared/types';
 
 type Page = 'home' | 'folders' | 'archive' | 'settings';
 
@@ -14,13 +15,56 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
 
-  // Check for stale tabs badge on mount
+  // Apply theme on mount and when settings change
   useEffect(() => {
-    chrome.action.getBadgeText({}).then((text) => {
-      if (text && parseInt(text) > 0) {
-        // Show notification indicator
+    const applyTheme = (theme: 'light' | 'dark' | 'system') => {
+      const root = document.documentElement;
+      if (theme === 'dark') {
+        root.classList.add('dark');
+      } else if (theme === 'light') {
+        root.classList.remove('dark');
+      } else {
+        // System preference
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (prefersDark) {
+          root.classList.add('dark');
+        } else {
+          root.classList.remove('dark');
+        }
       }
+    };
+
+    // Load and apply theme
+    chrome.storage.local.get('user_settings').then((result) => {
+      const settings = result.user_settings as UserSettings | undefined;
+      applyTheme(settings?.theme || 'system');
     });
+
+    // Listen for storage changes (when settings are updated)
+    const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+      if (changes.user_settings?.newValue) {
+        const newSettings = changes.user_settings.newValue as UserSettings;
+        applyTheme(newSettings.theme || 'system');
+      }
+    };
+    chrome.storage.onChanged.addListener(handleStorageChange);
+
+    // Listen for system theme changes
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleSystemThemeChange = () => {
+      chrome.storage.local.get('user_settings').then((result) => {
+        const settings = result.user_settings as UserSettings | undefined;
+        if (settings?.theme === 'system') {
+          applyTheme('system');
+        }
+      });
+    };
+    mediaQuery.addEventListener('change', handleSystemThemeChange);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(handleStorageChange);
+      mediaQuery.removeEventListener('change', handleSystemThemeChange);
+    };
   }, []);
 
   const renderPage = () => {
