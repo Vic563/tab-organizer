@@ -8,36 +8,45 @@ import {
   LogIn,
   LogOut,
   User,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle,
 } from 'lucide-react';
 import type { UserSettings } from '@/shared/types';
 import { DEFAULT_SETTINGS } from '@/shared/types';
+import { useAuthStore } from '@/shared/stores/authStore';
 
 export default function SettingsPage() {
+  const {
+    user,
+    profile,
+    loading: authLoading,
+    error: authError,
+    isConfigured,
+    initialize,
+    signIn,
+    signOut,
+    syncToCloud,
+    syncFromCloud,
+  } = useAuthStore();
+
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     loadSettings();
-  }, []);
+    initialize();
+  }, [initialize]);
 
   const loadSettings = async () => {
     setLoading(true);
     try {
-      const result = await chrome.storage.local.get([
-        'user_settings',
-        'supabase_session',
-      ]);
+      const result = await chrome.storage.local.get('user_settings');
       const user_settings = result.user_settings as UserSettings | undefined;
-      const supabase_session = result.supabase_session as { access_token: string; refresh_token: string } | undefined;
-
       if (user_settings) {
         setSettings(user_settings);
-      }
-      if (supabase_session?.access_token) {
-        setIsLoggedIn(true);
-        // TODO: Decode JWT to get email
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -55,18 +64,41 @@ export default function SettingsPage() {
     await chrome.storage.local.set({ user_settings: updated });
   };
 
-  const handleSignIn = () => {
-    // TODO: Implement Supabase OAuth sign in
-    alert('Sign in with Google coming soon!');
+  const handleSignIn = async () => {
+    const success = await signIn();
+    if (success) {
+      setSyncMessage({ type: 'success', text: 'Signed in and synced!' });
+      setTimeout(() => setSyncMessage(null), 3000);
+    }
   };
 
   const handleSignOut = async () => {
-    await chrome.storage.local.remove('supabase_session');
-    setIsLoggedIn(false);
-    setUserEmail(null);
+    await signOut();
+    setSyncMessage({ type: 'success', text: 'Signed out' });
+    setTimeout(() => setSyncMessage(null), 3000);
   };
 
-  if (loading) {
+  const handleSyncNow = async () => {
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const uploadSuccess = await syncToCloud();
+      const downloadSuccess = await syncFromCloud();
+
+      if (uploadSuccess && downloadSuccess) {
+        setSyncMessage({ type: 'success', text: 'Sync complete!' });
+      } else {
+        setSyncMessage({ type: 'error', text: 'Sync failed. Try again.' });
+      }
+    } catch (error) {
+      setSyncMessage({ type: 'error', text: 'Sync failed. Try again.' });
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMessage(null), 3000);
+    }
+  };
+
+  if (loading || authLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -75,42 +107,104 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="h-full">
+    <div className="h-full overflow-y-auto">
       {/* Account Section */}
       <div className="px-4 py-4 border-b border-gray-100">
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
           Account
         </h3>
 
-        {isLoggedIn ? (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                <User className="w-5 h-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">
-                  {userEmail || 'Signed in'}
-                </p>
-                <p className="text-xs text-gray-500">Sync enabled</p>
-              </div>
+        {!isConfigured ? (
+          <div className="flex items-center gap-3 p-3 bg-yellow-50 rounded-lg">
+            <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-yellow-800">Cloud sync not configured</p>
+              <p className="text-xs text-yellow-600 mt-0.5">
+                Add Supabase credentials to enable sync
+              </p>
             </div>
+          </div>
+        ) : user ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt=""
+                    className="w-10 h-10 rounded-full"
+                  />
+                ) : (
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <User className="w-5 h-5 text-blue-600" />
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm font-medium text-gray-900">
+                    {profile?.display_name || user.email}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {user.email}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleSignOut}
+                className="flex items-center gap-1 text-xs text-red-600 hover:text-red-700"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign out
+              </button>
+            </div>
+
+            {/* Sync Button */}
             <button
-              onClick={handleSignOut}
-              className="flex items-center gap-1 text-xs text-red-600 hover:text-red-700"
+              onClick={handleSyncNow}
+              disabled={syncing}
+              className="w-full flex items-center justify-center gap-2 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
             >
-              <LogOut className="w-4 h-4" />
-              Sign out
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing...' : 'Sync Now'}
             </button>
+
+            {/* Sync Message */}
+            {syncMessage && (
+              <div className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
+                syncMessage.type === 'success'
+                  ? 'bg-green-50 text-green-700'
+                  : 'bg-red-50 text-red-700'
+              }`}>
+                {syncMessage.type === 'success' ? (
+                  <CheckCircle className="w-4 h-4" />
+                ) : (
+                  <AlertCircle className="w-4 h-4" />
+                )}
+                {syncMessage.text}
+              </div>
+            )}
           </div>
         ) : (
-          <button
-            onClick={handleSignIn}
-            className="w-full flex items-center justify-center gap-2 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors"
-          >
-            <LogIn className="w-4 h-4" />
-            Sign in to sync
-          </button>
+          <div className="space-y-3">
+            <button
+              onClick={handleSignIn}
+              disabled={authLoading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+            >
+              <LogIn className="w-4 h-4" />
+              Sign in with Google
+            </button>
+
+            {authError && (
+              <div className="flex items-center gap-2 p-2 bg-red-50 rounded-lg text-sm text-red-700">
+                <AlertCircle className="w-4 h-4" />
+                {authError}
+              </div>
+            )}
+
+            <p className="text-xs text-gray-500 text-center">
+              Sign in to sync your tabs across devices
+            </p>
+          </div>
         )}
       </div>
 
@@ -237,10 +331,10 @@ export default function SettingsPage() {
                 onChange={(e) =>
                   updateSetting('sync_enabled', e.target.checked)
                 }
-                disabled={!isLoggedIn}
+                disabled={!user}
                 className="sr-only peer"
               />
-              <div className={`w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 ${!isLoggedIn ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+              <div className={`w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 ${!user ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
             </label>
           </div>
         </div>
@@ -252,6 +346,9 @@ export default function SettingsPage() {
           About
         </h3>
         <p className="text-xs text-gray-500">Tab Organizer v1.0.0</p>
+        <p className="text-xs text-gray-400 mt-1">
+          {isConfigured ? 'Cloud sync available' : 'Running in offline mode'}
+        </p>
       </div>
     </div>
   );
