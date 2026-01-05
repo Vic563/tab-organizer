@@ -6,21 +6,11 @@
  * instead of setTimeout/setInterval.
  */
 
-import type { TabActivity, Message, MessageResponse, StaleTab, UserSettings } from '../shared/types';
+import type { TabActivity, Message, MessageResponse, StaleTab, UserSettings, LocalFolder, LocalSavedTab } from '../shared/types';
 import { DEFAULT_SETTINGS } from '../shared/types';
 
 // Type for tab activity storage
 type TabActivityMap = Record<string, TabActivity>;
-
-interface SavedTabLocal {
-  id: string;
-  url: string;
-  title: string;
-  favicon_url: string | null;
-  created_at: string;
-  session_id: string | null;
-  folder_id: string | null;
-}
 
 // ============================================================================
 // Event Listeners (registered synchronously at module load)
@@ -284,8 +274,8 @@ async function handleMessageAsync(message: Message): Promise<MessageResponse> {
       }
 
       case 'SAVE_TABS': {
-        const tabIds = message.payload as number[];
-        await saveTabs(tabIds);
+        const payload = message.payload as { tabIds: number[]; folderId?: string };
+        await saveTabs(payload.tabIds, payload.folderId);
         return { success: true };
       }
 
@@ -297,6 +287,46 @@ async function handleMessageAsync(message: Message): Promise<MessageResponse> {
 
       case 'SYNC_NOW': {
         await performCloudSync();
+        return { success: true };
+      }
+
+      case 'GET_FOLDERS': {
+        const result = await chrome.storage.local.get('folders');
+        return { success: true, data: result.folders || [] };
+      }
+
+      case 'CREATE_FOLDER': {
+        const { name, icon, color } = message.payload as { name: string; icon?: string; color?: string };
+        await createFolder(name, icon, color);
+        return { success: true };
+      }
+
+      case 'UPDATE_FOLDER': {
+        const { id, updates } = message.payload as { id: string; updates: Partial<LocalFolder> };
+        await updateFolder(id, updates);
+        return { success: true };
+      }
+
+      case 'DELETE_FOLDER': {
+        const { id } = message.payload as { id: string };
+        await deleteFolder(id);
+        return { success: true };
+      }
+
+      case 'GET_SAVED_TABS': {
+        const result = await chrome.storage.local.get('saved_tabs');
+        return { success: true, data: result.saved_tabs || [] };
+      }
+
+      case 'DELETE_SAVED_TAB': {
+        const { id } = message.payload as { id: string };
+        await deleteSavedTab(id);
+        return { success: true };
+      }
+
+      case 'RESTORE_TABS': {
+        const { tabIds } = message.payload as { tabIds: string[] };
+        await restoreTabs(tabIds);
         return { success: true };
       }
 
@@ -316,9 +346,9 @@ async function handleMessageAsync(message: Message): Promise<MessageResponse> {
 // Tab Operations
 // ============================================================================
 
-async function saveTabs(tabIds: number[]) {
+async function saveTabs(tabIds: number[], folderId?: string) {
   const result = await chrome.storage.local.get('saved_tabs');
-  const saved_tabs = (result.saved_tabs || []) as SavedTabLocal[];
+  const saved_tabs = (result.saved_tabs || []) as LocalSavedTab[];
 
   for (const tabId of tabIds) {
     try {
@@ -332,7 +362,7 @@ async function saveTabs(tabIds: number[]) {
         favicon_url: tab.favIconUrl || null,
         created_at: new Date().toISOString(),
         session_id: null,
-        folder_id: null,
+        folder_id: folderId || null,
       });
     } catch {
       // Tab doesn't exist anymore
@@ -340,6 +370,85 @@ async function saveTabs(tabIds: number[]) {
   }
 
   await chrome.storage.local.set({ saved_tabs });
+}
+
+// ============================================================================
+// Folder Operations
+// ============================================================================
+
+async function createFolder(name: string, icon?: string, color?: string) {
+  const result = await chrome.storage.local.get('folders');
+  const folders = (result.folders || []) as LocalFolder[];
+
+  const newFolder: LocalFolder = {
+    id: crypto.randomUUID(),
+    name,
+    icon: icon || null,
+    color: color || null,
+    position: folders.length,
+    created_at: new Date().toISOString(),
+  };
+
+  folders.push(newFolder);
+  await chrome.storage.local.set({ folders });
+  console.log('[TabOrganizer] Created folder:', name);
+}
+
+async function updateFolder(id: string, updates: Partial<LocalFolder>) {
+  const result = await chrome.storage.local.get('folders');
+  const folders = (result.folders || []) as LocalFolder[];
+
+  const index = folders.findIndex((f) => f.id === id);
+  if (index !== -1) {
+    folders[index] = { ...folders[index], ...updates };
+    await chrome.storage.local.set({ folders });
+    console.log('[TabOrganizer] Updated folder:', id);
+  }
+}
+
+async function deleteFolder(id: string) {
+  const result = await chrome.storage.local.get(['folders', 'saved_tabs']);
+  const folders = (result.folders || []) as LocalFolder[];
+  const saved_tabs = (result.saved_tabs || []) as LocalSavedTab[];
+
+  // Remove folder
+  const updatedFolders = folders.filter((f) => f.id !== id);
+
+  // Remove folder_id from tabs in this folder (move to unfiled)
+  const updatedTabs = saved_tabs.map((tab) =>
+    tab.folder_id === id ? { ...tab, folder_id: null } : tab
+  );
+
+  await chrome.storage.local.set({
+    folders: updatedFolders,
+    saved_tabs: updatedTabs,
+  });
+  console.log('[TabOrganizer] Deleted folder:', id);
+}
+
+async function deleteSavedTab(id: string) {
+  const result = await chrome.storage.local.get('saved_tabs');
+  const saved_tabs = (result.saved_tabs || []) as LocalSavedTab[];
+
+  const updatedTabs = saved_tabs.filter((t) => t.id !== id);
+  await chrome.storage.local.set({ saved_tabs: updatedTabs });
+  console.log('[TabOrganizer] Deleted saved tab:', id);
+}
+
+async function restoreTabs(tabIds: string[]) {
+  const result = await chrome.storage.local.get('saved_tabs');
+  const saved_tabs = (result.saved_tabs || []) as LocalSavedTab[];
+
+  const tabsToRestore = saved_tabs.filter((t) => tabIds.includes(t.id));
+
+  // Open each tab
+  for (const tab of tabsToRestore) {
+    await chrome.tabs.create({ url: tab.url, active: false });
+  }
+
+  // Optionally remove from saved (or keep for history)
+  // For now, keep them saved
+  console.log('[TabOrganizer] Restored', tabsToRestore.length, 'tabs');
 }
 
 async function syncCurrentTabs() {

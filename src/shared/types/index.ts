@@ -64,6 +64,27 @@ export interface Folder {
   updated_at: string;
 }
 
+// Local folder type (for local storage before cloud sync)
+export interface LocalFolder {
+  id: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  position: number;
+  created_at: string;
+}
+
+// Local saved tab type
+export interface LocalSavedTab {
+  id: string;
+  url: string;
+  title: string;
+  favicon_url: string | null;
+  folder_id: string | null;
+  session_id: string | null;
+  created_at: string;
+}
+
 // Archive types
 export interface ArchivedTab {
   id: string;
@@ -116,7 +137,14 @@ export type MessageType =
   | 'CLOSE_TABS'
   | 'RESTORE_SESSION'
   | 'SYNC_NOW'
-  | 'GET_TAB_ACTIVITY';
+  | 'GET_TAB_ACTIVITY'
+  | 'GET_FOLDERS'
+  | 'CREATE_FOLDER'
+  | 'UPDATE_FOLDER'
+  | 'DELETE_FOLDER'
+  | 'GET_SAVED_TABS'
+  | 'DELETE_SAVED_TAB'
+  | 'RESTORE_TABS';
 
 export interface Message<T = unknown> {
   type: MessageType;

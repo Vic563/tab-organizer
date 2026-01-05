@@ -4,6 +4,7 @@ import HomePage from './popup/pages/Home';
 import FoldersPage from './popup/pages/Folders';
 import ArchivePage from './popup/pages/Archive';
 import SettingsPage from './popup/pages/Settings';
+import SearchResults from './popup/pages/SearchResults';
 import SearchBar from './popup/components/SearchBar';
 
 type Page = 'home' | 'folders' | 'archive' | 'settings';
@@ -24,8 +25,8 @@ function App() {
 
   const renderPage = () => {
     if (isSearching && searchQuery) {
-      // Show search results
-      return <HomePage searchQuery={searchQuery} />;
+      // Show search results for both active and saved tabs
+      return <SearchResults query={searchQuery} />;
     }
 
     switch (currentPage) {
