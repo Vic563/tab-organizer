@@ -12,9 +12,12 @@ A Chrome extension for automatic and manual tab organization with cloud sync - s
 - **Search** - Search across both open and saved tabs
 - **Archive View** - View and manage all saved tabs grouped by date
 
+### Implemented (Phase 3)
+- **Cloud Sync** - Sync folders and tabs across devices with Supabase
+- **Google Sign In** - Authenticate via Google OAuth
+
 ### Coming Soon
 - **Smart Sessions** - Auto-groups related tabs based on time
-- **Cloud Sync** - Sync across devices with Supabase
 
 ## Tech Stack
 
@@ -23,7 +26,7 @@ A Chrome extension for automatic and manual tab organization with cloud sync - s
 - Vite + CRXJS
 - Tailwind CSS v4
 - Zustand (state management)
-- Supabase (backend - coming soon)
+- Supabase (backend & auth)
 
 ## Development
 
@@ -31,12 +34,20 @@ A Chrome extension for automatic and manual tab organization with cloud sync - s
 
 - Node.js 18+
 - npm or yarn
+- Supabase account (for cloud sync)
 
 ### Setup
 
 ```bash
 # Install dependencies
 npm install
+
+# Copy environment template
+cp .env.example .env
+
+# Add your Supabase credentials to .env
+# VITE_SUPABASE_URL=https://your-project.supabase.co
+# VITE_SUPABASE_ANON_KEY=your-anon-key
 
 # Start development server
 npm run dev
@@ -45,6 +56,13 @@ npm run dev
 npm run build
 ```
 
+### Supabase Setup (for Cloud Sync)
+
+1. Create a new project at [supabase.com](https://supabase.com)
+2. Go to SQL Editor and run the migration: `supabase/migrations/001_initial_schema.sql`
+3. Go to Authentication > Providers and enable Google
+4. Copy your project URL and anon key to `.env`
+
 ### Load Extension in Chrome
 
 1. Build the extension: `npm run build`
@@ -52,6 +70,14 @@ npm run build
 3. Enable "Developer mode" (toggle in top right)
 4. Click "Load unpacked"
 5. Select the `dist` folder
+
+### Testing the Extension
+
+1. After loading, click the Tab Organizer icon in the toolbar
+2. Navigate between tabs to see them tracked
+3. Create folders and save tabs to them
+4. Search across open and saved tabs
+5. (Optional) Sign in with Google to enable cloud sync
 
 ## Project Structure
 
@@ -76,7 +102,7 @@ tab-organizer/
 
 - [x] Phase 1: Foundation - Project setup, manifest, service worker
 - [x] Phase 2: Core Features - Tab tracking, save/close, folders, search
-- [ ] Phase 3: Cloud Integration - Supabase, auth, sync
+- [x] Phase 3: Cloud Integration - Supabase, auth, sync
 - [ ] Phase 4: Smart Features - Auto-grouping, archive, sessions
 - [ ] Phase 5: Polish - UI, onboarding, Chrome Web Store
 
