@@ -134,14 +134,31 @@ export async function signInWithGoogle(): Promise<{ user: User | null; error: Er
       );
     });
 
-    // Extract tokens from the response URL
+    // Extract tokens or auth code from the response URL
     const url = new URL(responseUrl);
+    const queryParams = new URLSearchParams(url.search);
     const hashParams = new URLSearchParams(url.hash.substring(1));
+    const responseError = queryParams.get('error') || hashParams.get('error');
+    const responseErrorDescription = queryParams.get('error_description') || hashParams.get('error_description');
+
+    if (responseError) {
+      throw new Error(
+        responseErrorDescription ? `${responseError}: ${responseErrorDescription}` : responseError
+      );
+    }
+
+    const code = queryParams.get('code') || hashParams.get('code');
+    if (code) {
+      const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+      if (exchangeError) throw exchangeError;
+      return { user: exchangeData.user, error: null };
+    }
+
     const accessToken = hashParams.get('access_token');
     const refreshToken = hashParams.get('refresh_token');
 
     if (!accessToken) {
-      throw new Error('No access token in response');
+      throw new Error('No access token or authorization code in response');
     }
 
     // Set the session in Supabase

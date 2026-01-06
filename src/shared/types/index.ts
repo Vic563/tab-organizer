@@ -119,6 +119,37 @@ export interface StaleTab {
   inactive_hours: number;
 }
 
+// Smart Session types (Phase 4)
+export interface SmartSession {
+  id: string;
+  name: string;
+  tabs: SmartSessionTab[];
+  start_time: string;
+  end_time: string;
+  auto_generated: boolean;
+  topic_tags: string[];
+  dominant_domain: string | null;
+}
+
+export interface SmartSessionTab {
+  chrome_tab_id: number;
+  url: string;
+  title: string;
+  favicon_url: string | null;
+  first_seen_at: number;
+  last_active_at: number;
+}
+
+// Tab Group types (for domain-based grouping)
+export interface TabGroup {
+  id: string;
+  name: string;
+  domain: string;
+  tabs: TabActivity[];
+  tab_count: number;
+  color: string;
+}
+
 // Storage keys
 export type StorageKey =
   | 'tab_activity'
@@ -128,13 +159,16 @@ export type StorageKey =
   | 'sync_queue'
   | 'saved_tabs'
   | 'sessions'
-  | 'folders';
+  | 'folders'
+  | 'smart_sessions'
+  | 'archived_tabs';
 
 // Message types for background/popup communication
 export type MessageType =
   | 'GET_STALE_TABS'
   | 'SAVE_TABS'
   | 'CLOSE_TABS'
+  | 'OPEN_TAB'
   | 'RESTORE_SESSION'
   | 'SYNC_NOW'
   | 'GET_TAB_ACTIVITY'
@@ -144,7 +178,14 @@ export type MessageType =
   | 'DELETE_FOLDER'
   | 'GET_SAVED_TABS'
   | 'DELETE_SAVED_TAB'
-  | 'RESTORE_TABS';
+  | 'RESTORE_TABS'
+  | 'GET_SMART_SESSIONS'
+  | 'GET_TAB_GROUPS'
+  | 'SAVE_SESSION_AS_FOLDER'
+  | 'GET_ARCHIVED_TABS'
+  | 'ARCHIVE_TABS_NOW'
+  | 'BULK_DELETE_SAVED_TABS'
+  | 'BULK_RESTORE_TABS';
 
 export interface Message<T = unknown> {
   type: MessageType;

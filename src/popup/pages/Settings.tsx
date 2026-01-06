@@ -90,7 +90,7 @@ export default function SettingsPage() {
       } else {
         setSyncMessage({ type: 'error', text: 'Sync failed. Try again.' });
       }
-    } catch (error) {
+    } catch {
       setSyncMessage({ type: 'error', text: 'Sync failed. Try again.' });
     } finally {
       setSyncing(false);

@@ -76,6 +76,7 @@ export default function TabList({
   const { folders, loadFolders } = useFolderStore();
   const { saveTab } = useTabStore();
   const [openDropdown, setOpenDropdown] = useState<number | null>(null);
+  const [now] = useState(() => Date.now());
 
   useEffect(() => {
     loadFolders();
@@ -94,7 +95,7 @@ export default function TabList({
   }
 
   const formatTime = (timestamp: number) => {
-    const diff = Date.now() - timestamp;
+    const diff = now - timestamp;
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);

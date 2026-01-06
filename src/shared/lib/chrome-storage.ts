@@ -11,6 +11,8 @@ import type {
   UserSettings,
   Session,
   Folder,
+  SmartSession,
+  LocalSavedTab,
 } from '@/shared/types';
 import { DEFAULT_SETTINGS } from '@/shared/types';
 
@@ -26,6 +28,8 @@ type StorageData = {
   saved_tabs: SavedTabLocal[];
   sessions: Session[];
   folders: Folder[];
+  smart_sessions: SmartSession[];
+  archived_tabs: LocalSavedTab[];
 };
 
 interface SavedTabLocal {
@@ -55,6 +59,8 @@ const defaultValues: StorageData = {
   saved_tabs: [],
   sessions: [],
   folders: [],
+  smart_sessions: [],
+  archived_tabs: [],
 };
 
 /**

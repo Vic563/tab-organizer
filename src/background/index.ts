@@ -6,8 +6,10 @@
  * instead of setTimeout/setInterval.
  */
 
-import type { TabActivity, Message, MessageResponse, StaleTab, UserSettings, LocalFolder, LocalSavedTab } from '../shared/types';
+import type { TabActivity, Message, MessageResponse, StaleTab, UserSettings, LocalFolder, LocalSavedTab, SmartSession, TabGroup } from '../shared/types';
 import { DEFAULT_SETTINGS } from '../shared/types';
+import { detectSmartSessions } from '../shared/lib/topic-extractor';
+import { getAllSmartGroups } from '../shared/lib/tab-grouping';
 
 // Type for tab activity storage
 type TabActivityMap = Record<string, TabActivity>;
@@ -372,8 +374,14 @@ async function handleMessageAsync(message: Message): Promise<MessageResponse> {
 
       case 'CLOSE_TABS': {
         const tabIds = message.payload as number[];
-        await chrome.tabs.remove(tabIds);
-        return { success: true };
+        const result = await safeCloseTabs(tabIds);
+        return result;
+      }
+
+      case 'OPEN_TAB': {
+        const payload = message.payload as { tabId: number; url?: string };
+        const result = await safeOpenTab(payload);
+        return result;
       }
 
       case 'SYNC_NOW': {
@@ -416,6 +424,44 @@ async function handleMessageAsync(message: Message): Promise<MessageResponse> {
       }
 
       case 'RESTORE_TABS': {
+        const { tabIds } = message.payload as { tabIds: string[] };
+        await restoreTabs(tabIds);
+        return { success: true };
+      }
+
+      case 'GET_SMART_SESSIONS': {
+        const sessions = await getSmartSessions();
+        return { success: true, data: sessions };
+      }
+
+      case 'GET_TAB_GROUPS': {
+        const groups = await getTabGroups();
+        return { success: true, data: groups };
+      }
+
+      case 'SAVE_SESSION_AS_FOLDER': {
+        const { sessionId, folderName } = message.payload as { sessionId: string; folderName: string };
+        await saveSessionAsFolder(sessionId, folderName);
+        return { success: true };
+      }
+
+      case 'GET_ARCHIVED_TABS': {
+        const result = await chrome.storage.local.get('archived_tabs');
+        return { success: true, data: result.archived_tabs || [] };
+      }
+
+      case 'ARCHIVE_TABS_NOW': {
+        await archiveTabsNow();
+        return { success: true };
+      }
+
+      case 'BULK_DELETE_SAVED_TABS': {
+        const { tabIds } = message.payload as { tabIds: string[] };
+        await bulkDeleteSavedTabs(tabIds);
+        return { success: true };
+      }
+
+      case 'BULK_RESTORE_TABS': {
         const { tabIds } = message.payload as { tabIds: string[] };
         await restoreTabs(tabIds);
         return { success: true };
@@ -579,4 +625,157 @@ async function syncCurrentTabs() {
   } catch (error) {
     console.error('[TabOrganizer] Error syncing tabs:', error);
   }
+}
+
+// ============================================================================
+// Tab Close Operations (Phase 4)
+// ============================================================================
+
+async function safeCloseTabs(tabIds: number[]): Promise<MessageResponse> {
+  const errors: Array<{ tabId: number; reason: 'blocked_by_page' | 'no_tab' | 'unknown'; message?: string }> = [];
+
+  for (const tabId of tabIds) {
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      let reason: 'blocked_by_page' | 'no_tab' | 'unknown' = 'unknown';
+
+      if (message.includes('No tab with id')) {
+        reason = 'no_tab';
+      } else if (message.toLowerCase().includes('disallowed') || message.toLowerCase().includes('not allowed')) {
+        reason = 'blocked_by_page';
+      }
+
+      errors.push({ tabId, reason, message });
+
+      if (reason === 'no_tab') {
+        const result = await chrome.storage.local.get('tab_activity');
+        const tab_activity = (result.tab_activity || {}) as TabActivityMap;
+        if (tab_activity[tabId]) {
+          delete tab_activity[tabId];
+          await chrome.storage.local.set({ tab_activity });
+        }
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    return { success: false, error: 'Some tabs could not be closed', data: errors };
+  }
+
+  return { success: true };
+}
+
+async function safeOpenTab(payload: { tabId: number; url?: string }): Promise<MessageResponse> {
+  try {
+    const tab = await chrome.tabs.get(payload.tabId);
+    await chrome.tabs.update(tab.id!, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    return { success: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    if (payload.url) {
+      try {
+        await chrome.tabs.create({ url: payload.url, active: true });
+        return { success: true, data: { fallback: 'created_new_tab' } };
+      } catch (fallbackError) {
+        const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : 'Unknown error';
+        return { success: false, error: fallbackMessage };
+      }
+    }
+
+    return { success: false, error: message };
+  }
+}
+
+// ============================================================================
+// Smart Session Operations (Phase 4)
+// ============================================================================
+
+async function getSmartSessions(): Promise<SmartSession[]> {
+  const result = await chrome.storage.local.get('tab_activity');
+  const tab_activity = (result.tab_activity || {}) as TabActivityMap;
+  const tabs = Object.values(tab_activity);
+  return detectSmartSessions(tabs);
+}
+
+async function getTabGroups(): Promise<TabGroup[]> {
+  const result = await chrome.storage.local.get('tab_activity');
+  const tab_activity = (result.tab_activity || {}) as TabActivityMap;
+  const tabs = Object.values(tab_activity);
+  return getAllSmartGroups(tabs);
+}
+
+async function saveSessionAsFolder(sessionId: string, folderName: string) {
+  const sessions = await getSmartSessions();
+  const session = sessions.find(s => s.id === sessionId);
+  if (!session) return;
+
+  // Create folder
+  await createFolder(folderName);
+
+  // Get folder ID
+  const foldersResult = await chrome.storage.local.get('folders');
+  const folders = (foldersResult.folders || []) as LocalFolder[];
+  const folder = folders.find(f => f.name === folderName);
+  if (!folder) return;
+
+  // Save tabs to folder
+  const result = await chrome.storage.local.get('saved_tabs');
+  const saved_tabs = (result.saved_tabs || []) as LocalSavedTab[];
+
+  for (const tab of session.tabs) {
+    saved_tabs.push({
+      id: crypto.randomUUID(),
+      url: tab.url,
+      title: tab.title,
+      favicon_url: tab.favicon_url,
+      created_at: new Date().toISOString(),
+      session_id: sessionId,
+      folder_id: folder.id,
+    });
+  }
+
+  await chrome.storage.local.set({ saved_tabs });
+  console.log('[TabOrganizer] Saved session as folder:', folderName);
+}
+
+async function archiveTabsNow() {
+  const result = await chrome.storage.local.get(['saved_tabs', 'archived_tabs', 'user_settings']);
+  const saved_tabs = (result.saved_tabs || []) as LocalSavedTab[];
+  const archived_tabs = (result.archived_tabs || []) as LocalSavedTab[];
+  const settings = (result.user_settings || DEFAULT_SETTINGS) as UserSettings;
+
+  const thresholdMs = settings.auto_archive_days * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  const tabsToArchive: LocalSavedTab[] = [];
+  const remainingTabs: LocalSavedTab[] = [];
+
+  for (const tab of saved_tabs) {
+    const tabAge = now - new Date(tab.created_at).getTime();
+    if (tabAge > thresholdMs) {
+      tabsToArchive.push(tab);
+    } else {
+      remainingTabs.push(tab);
+    }
+  }
+
+  await chrome.storage.local.set({
+    saved_tabs: remainingTabs,
+    archived_tabs: [...archived_tabs, ...tabsToArchive],
+  });
+
+  console.log('[TabOrganizer] Manually archived', tabsToArchive.length, 'tabs');
+}
+
+async function bulkDeleteSavedTabs(tabIds: string[]) {
+  const result = await chrome.storage.local.get('saved_tabs');
+  const saved_tabs = (result.saved_tabs || []) as LocalSavedTab[];
+
+  const updatedTabs = saved_tabs.filter((t) => !tabIds.includes(t.id));
+  await chrome.storage.local.set({ saved_tabs: updatedTabs });
+  console.log('[TabOrganizer] Bulk deleted', tabIds.length, 'tabs');
 }

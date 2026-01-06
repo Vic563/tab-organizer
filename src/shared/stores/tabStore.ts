@@ -7,6 +7,7 @@ interface TabState {
   staleTabs: StaleTab[];
   loading: boolean;
   error: string | null;
+  closeError: string | null;
 
   // Actions
   loadActiveTabs: () => Promise<void>;
@@ -14,7 +15,9 @@ interface TabState {
   saveTab: (tabId: number, folderId?: string) => Promise<void>;
   saveTabs: (tabIds: number[], folderId?: string) => Promise<void>;
   closeTab: (tabId: number) => Promise<void>;
+  openTab: (tabId: number, url?: string) => Promise<void>;
   closeTabs: (tabIds: number[]) => Promise<void>;
+  clearCloseError: () => void;
   saveAndCloseTabs: (tabIds: number[], folderId?: string) => Promise<void>;
   refreshAll: () => Promise<void>;
 }
@@ -24,6 +27,7 @@ export const useTabStore = create<TabState>((set, get) => ({
   staleTabs: [],
   loading: false,
   error: null,
+  closeError: null,
 
   loadActiveTabs: async () => {
     set({ loading: true, error: null });
@@ -38,7 +42,7 @@ export const useTabStore = create<TabState>((set, get) => ({
       } else {
         set({ error: response.error || 'Failed to load tabs', loading: false });
       }
-    } catch (error) {
+    } catch {
       set({ error: 'Failed to load tabs', loading: false });
     }
   },
@@ -78,28 +82,53 @@ export const useTabStore = create<TabState>((set, get) => ({
 
   closeTab: async (tabId: number) => {
     try {
-      await chrome.runtime.sendMessage({
+      const response = await chrome.runtime.sendMessage({
         type: 'CLOSE_TABS',
         payload: [tabId],
       });
+      if (!response.success) {
+        set({ closeError: response.error || 'Tab could not be closed' });
+      }
       // Refresh the tab list
       await get().loadActiveTabs();
     } catch (error) {
       console.error('Failed to close tab:', error);
+      set({ closeError: 'Tab could not be closed' });
+    }
+  },
+
+  openTab: async (tabId: number, url?: string) => {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'OPEN_TAB',
+        payload: { tabId, url },
+      });
+      if (!response.success) {
+        set({ closeError: response.error || 'Tab could not be opened' });
+      }
+    } catch (error) {
+      console.error('Failed to open tab:', error);
+      set({ closeError: 'Tab could not be opened' });
     }
   },
 
   closeTabs: async (tabIds: number[]) => {
     try {
-      await chrome.runtime.sendMessage({
+      const response = await chrome.runtime.sendMessage({
         type: 'CLOSE_TABS',
         payload: tabIds,
       });
+      if (!response.success) {
+        set({ closeError: response.error || 'Some tabs could not be closed' });
+      }
       await get().loadActiveTabs();
     } catch (error) {
       console.error('Failed to close tabs:', error);
+      set({ closeError: 'Some tabs could not be closed' });
     }
   },
+
+  clearCloseError: () => set({ closeError: null }),
 
   saveAndCloseTabs: async (tabIds: number[], folderId?: string) => {
     try {

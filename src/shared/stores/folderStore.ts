@@ -45,7 +45,7 @@ export const useFolderStore = create<FolderState>((set, get) => ({
       } else {
         set({ error: response.error || 'Failed to load saved tabs', loading: false });
       }
-    } catch (error) {
+    } catch {
       set({ error: 'Failed to load saved tabs', loading: false });
     }
   },
